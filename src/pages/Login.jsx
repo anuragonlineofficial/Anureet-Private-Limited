@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LogIn, Mail, Lock, Shield, UserCog } from 'lucide-react'
+import { LogIn, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
@@ -9,7 +9,8 @@ import { auth, db } from '../services/firebase'
 import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
-  const [form, setForm] = useState({ email: '', password: '', role: 'admin' })
+  const [form, setForm] = useState({ email: '', password: '' })
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { user, userData, loading: authLoading } = useAuth()
@@ -35,7 +36,7 @@ export default function Login() {
       const snap = await getDoc(doc(db, 'users', cred.user.uid))
       if (!snap.exists()) {
         await signOut(auth)
-        return toast.error('User record not found')
+        return toast.error('User record not found. Contact admin.')
       }
       
       const userData = snap.data()
@@ -43,6 +44,7 @@ export default function Login() {
       if (role === 'super_admin' || role === 'owner') role = 'admin'
       if (role === 'vle') role = 'operator'
       
+      // Status check
       if (userData.status === 'pending') {
         await signOut(auth)
         return toast.error('Account pending approval. Admin approval ke baad login kar paoge.')
@@ -56,24 +58,23 @@ export default function Login() {
         return toast.error('Account not active. Contact admin.')
       }
       
-      const roleMatch = (form.role === 'admin' && role === 'admin') ||
-                       (form.role === 'operator' && role === 'operator')
-      
-      if (!roleMatch) {
-        await signOut(auth)
-        return toast.error(`You are not authorized as ${form.role}. Please select "${role}" tab.`)
-      }
-      
-      toast.success('Login successful!')
+      toast.success(`Login successful! Welcome ${userData.name || ''}`)
       // Auto-redirect will happen via useEffect
       
     } catch (err) {
       console.error(err)
-      let msg = err.message?.replace('Firebase: ', '') || 'Login failed'
+      let msg = 'Login failed'
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
         msg = 'Invalid email or password'
+      } else if (err.code === 'auth/user-not-found') {
+        msg = 'User not found'
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Invalid email address'
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = 'Too many attempts. Try after some time.'
+      } else {
+        msg = err.message?.replace('Firebase: ', '') || 'Login failed'
       }
-      if (err.code === 'auth/user-not-found') msg = 'User not found'
       toast.error(msg)
     } finally {
       setLoading(false)
@@ -98,59 +99,85 @@ export default function Login() {
         className="w-full max-w-md">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-orange-500 flex items-center justify-center shadow-xl">
-              <span className="text-white font-bold text-2xl">A</span>
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-orange-500 flex items-center justify-center shadow-xl">
+              <span className="text-white font-bold text-3xl">A</span>
             </div>
           </Link>
-          <h1 className="text-2xl font-extrabold text-slate-900 mt-4">ANUREET</h1>
+          <h1 className="text-3xl font-extrabold text-slate-900 mt-4">ANUREET</h1>
           <p className="text-xs text-slate-500 font-semibold tracking-widest">PRIVATE LIMITED</p>
           <p className="text-slate-600 mt-4 text-sm">Sign in to continue</p>
         </div>
 
         <div className="card p-8">
-          <div className="grid grid-cols-2 gap-2 mb-6 p-1 bg-slate-100 rounded-xl">
-            {[
-              { value: 'admin', label: 'Admin', icon: Shield },
-              { value: 'operator', label: 'Operator', icon: UserCog }
-            ].map(({ value, label, icon: Icon }) => (
-              <button key={value} type="button"
-                onClick={() => setForm({ ...form, role: value })}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                  form.role === value ? 'bg-white shadow text-blue-700' : 'text-slate-500'
-                }`}>
-                <Icon size={16} /> {label}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="space-y-5">
             <div>
               <label className="label">Email or Mobile</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input type="text" className="input pl-10" value={form.email}
-                  onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Email or mobile" required />
+                <input 
+                  type="text" 
+                  className="input pl-10" 
+                  value={form.email}
+                  onChange={e => setForm({ ...form, email: e.target.value })} 
+                  placeholder="Enter your email or mobile" 
+                  autoComplete="username"
+                  required 
+                />
               </div>
             </div>
+            
             <div>
               <label className="label">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input type="password" className="input pl-10" value={form.password}
-                  onChange={e => setForm({ ...form, password: e.target.value })} placeholder="••••••••" required />
+                <input 
+                  type={showPassword ? 'text' : 'password'}
+                  className="input pl-10 pr-10" 
+                  value={form.password}
+                  onChange={e => setForm({ ...form, password: e.target.value })} 
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  required 
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
-            <button type="submit" disabled={loading} className="btn-primary w-full">
-              {loading ? 'Signing in...' : <><LogIn size={18} /> Sign In</>}
+            
+            <button type="submit" disabled={loading} className="btn-primary w-full text-lg py-3">
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
+                  Signing in...
+                </span>
+              ) : (
+                <><LogIn size={20} /> Sign In</>
+              )}
             </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t text-center space-y-2">
+          <div className="mt-6 pt-6 border-t text-center space-y-3">
             <p className="text-sm text-slate-600">
-              Don't have an account? <Link to="/signup" className="text-blue-700 font-semibold">Sign Up (₹151)</Link>
+              Don't have an account?{' '}
+              <Link to="/signup" className="text-blue-700 font-semibold hover:underline">
+                Sign Up (₹151)
+              </Link>
             </p>
-            <Link to="/" className="block text-sm text-slate-500 hover:text-blue-700">← Back to Home</Link>
+            <Link to="/" className="block text-sm text-slate-500 hover:text-blue-700">
+              ← Back to Home
+            </Link>
           </div>
+        </div>
+
+        <div className="mt-6 text-center">
+          <p className="text-xs text-slate-500">
+            🔒 Secured with Firebase Authentication
+          </p>
         </div>
       </motion.div>
     </div>
