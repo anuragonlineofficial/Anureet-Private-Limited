@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CreditCard, IndianRupee, CheckCircle2, Loader2, Shield } from 'lucide-react'
+import { CreditCard, IndianRupee, Loader2, Shield } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth'
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
@@ -18,13 +18,16 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
 
     setProcessing(true)
     try {
+      console.log('🚀 Starting real signup process...')
+
+      // STEP 1: Upload files
       let photoUrl = ''
       if (formData.photo) {
         const photoRef = ref(storage, `signup/${Date.now()}_${formData.photo.name}`)
         await uploadBytes(photoRef, formData.photo)
         photoUrl = await getDownloadURL(photoRef)
       }
-      
+
       let aadharFrontUrl = '', aadharBackUrl = ''
       if (formData.aadharFront) {
         const ref1 = ref(storage, `signup/${Date.now()}_aadhar_front.jpg`)
@@ -37,9 +40,11 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
         aadharBackUrl = await getDownloadURL(ref2)
       }
 
+      // STEP 2: Create Firebase Auth
       const cred = await createUserWithEmailAndPassword(auth, formData.email, password)
       await updateProfile(cred.user, { displayName: formData.name })
 
+      // STEP 3: Save to Firestore with paymentDone: false
       await setDoc(doc(db, 'users', cred.user.uid), {
         shopName: formData.shopName,
         name: formData.name,
@@ -59,6 +64,7 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
         updatedAt: serverTimestamp()
       })
 
+      // STEP 4: Send welcome email
       try {
         await emailjs.send(
           import.meta.env.VITE_EMAILJS_SERVICE_ID,
@@ -75,7 +81,9 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
         console.warn('Welcome email failed:', emailErr)
       }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/create-cashfree-order`, {
+      // STEP 5: Create real Cashfree order (via Vercel API function)
+      console.log('💰 Creating Cashfree order...')
+      const response = await fetch(`/api/create-cashfree-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,9 +105,11 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
         const errData = await response.json()
         throw new Error(errData.error || 'Failed to create payment order')
       }
-      
-      const orderData = await response.json()
 
+      const orderData = await response.json()
+      console.log('✅ Order created:', orderData.order_id)
+
+      // STEP 6: Load Cashfree SDK and open checkout
       if (!window.Cashfree) {
         await new Promise((resolve, reject) => {
           const script = document.createElement('script')
@@ -111,18 +121,22 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
       }
 
       const cashfree = window.Cashfree({
-        mode: import.meta.env.VITE_CASHFREE_MODE || 'sandbox'
+        mode: 'production' // REAL payments
       })
 
       await cashfree.checkout({
         paymentSessionId: orderData.payment_session_id,
         redirectTarget: '_modal'
       })
-      
+
+      // Payment status page will handle verification
+
     } catch (err) {
-      console.error(err)
-      let msg = err.message || 'Payment failed'
+      console.error('❌ Signup error:', err)
+      let msg = err.message || 'Signup failed'
       if (err.code === 'auth/email-already-in-use') msg = 'Email already registered'
+      if (err.code === 'auth/weak-password') msg = 'Password too weak'
+      if (err.code === 'permission-denied') msg = 'Firestore permission denied'
       toast.error(msg)
       setProcessing(false)
     }
@@ -135,7 +149,7 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
           <IndianRupee className="text-white" size={32} />
         </div>
         <h1 className="text-2xl font-extrabold text-slate-900">One-Time Payment</h1>
-        <p className="text-slate-600 text-sm mt-1">₹151 — Sirf ek baar</p>
+        <p className="text-slate-600 text-sm mt-1">₹151 — Sirf ek baar, lifetime access</p>
       </div>
 
       <div className="max-w-md mx-auto">
@@ -143,6 +157,10 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
           <div className="flex items-center justify-between mb-4">
             <span className="text-slate-700">Account Registration</span>
             <span className="font-bold text-slate-900">₹151</span>
+          </div>
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-slate-700">Type</span>
+            <span className="text-emerald-600 font-semibold">One-Time</span>
           </div>
           <div className="border-t border-slate-300 pt-4 flex items-center justify-between">
             <span className="font-bold text-lg">Total</span>
@@ -167,7 +185,7 @@ export default function Step3Payment({ formData, updateFormData, onNext, onBack 
           <Shield className="text-amber-600 shrink-0 mt-0.5" size={20} />
           <div className="text-xs text-amber-800">
             <p className="font-bold mb-1">Important:</p>
-            <p>Payment ke baad account <strong>pending approval</strong> rahega. Admin approve karega tab login kar paoge.</p>
+            <p>Real payment hoga. UPI, Card, Net Banking sab accept karenge. Payment ke baad admin approval chahiye.</p>
           </div>
         </div>
 
