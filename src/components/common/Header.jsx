@@ -14,7 +14,7 @@ const links = [
 export default function Header() {
   const [open, setOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const { userData } = useAuth()
+  const { user, userData, loading } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -23,7 +23,14 @@ export default function Header() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const dash = userData?.role === 'admin' ? '/admin' : userData?.role === 'vle' ? '/vle' : null
+  // Auto-detect role for dashboard URL
+  let dashboardPath = null
+  if (user && userData) {
+    let role = userData.role
+    if (role === 'super_admin' || role === 'owner' || role === 'Super Admin') role = 'admin'
+    if (role === 'vle') role = 'operator'
+    dashboardPath = role === 'admin' ? '/admin' : '/operator'
+  }
 
   return (
     <motion.header
@@ -55,11 +62,17 @@ export default function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
-          {userData && dash ? (
-            <button onClick={() => navigate(dash)} className="btn-primary hidden sm:inline-flex">
+          {loading ? (
+            // Loading state — chhota spinner
+            <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+          ) : dashboardPath ? (
+            // User logged in — Dashboard button
+            <button onClick={() => navigate(dashboardPath)}
+              className="btn-primary hidden sm:inline-flex">
               <LayoutDashboard size={16} /> Dashboard
             </button>
           ) : (
+            // Not logged in — Login button
             <Link to="/login" className="btn-primary hidden sm:inline-flex">
               <LogIn size={16} /> Login
             </Link>
@@ -82,8 +95,8 @@ export default function Header() {
                 </NavLink>
               ))}
               <div className="pt-2 border-t mt-2">
-                {userData && dash ? (
-                  <button onClick={() => { navigate(dash); setOpen(false) }} className="btn-primary w-full">
+                {loading ? null : dashboardPath ? (
+                  <button onClick={() => { navigate(dashboardPath); setOpen(false) }} className="btn-primary w-full">
                     <LayoutDashboard size={16} /> Dashboard
                   </button>
                 ) : (

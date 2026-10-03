@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Ban, Check, X, Search, Eye, CheckCircle2, Clock } from 'lucide-react'
+import { Plus, Trash2, Ban, Check, X, Search, Eye, CheckCircle2, Clock, Shield, UserCog } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { createUserWithEmailAndPassword } from 'firebase/auth'
+import { createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { initializeApp, deleteApp } from 'firebase/app'
+import { getAuth } from 'firebase/auth'
 import { auth, db } from '../../services/firebase'
 import { getVLEUsers, updateUser, deleteUser } from '../../services/userService'
+
+// 🔥 Secondary Firebase app for creating users WITHOUT logging out admin
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+}
 
 export default function UsersManage() {
   const [list, setList] = useState([])
@@ -15,6 +27,7 @@ export default function UsersManage() {
   const [viewUser, setViewUser] = useState(null)
   const [form, setForm] = useState({ name: '', email: '', password: '', mobile: '', role: 'operator' })
   const [confirm, setConfirm] = useState(null)
+  const [creating, setCreating] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -24,29 +37,51 @@ export default function UsersManage() {
 
   useEffect(() => { load() }, [])
 
+  // 🔥 CREATE USER - Super Admin can create any role
   const create = async (e) => {
     e.preventDefault()
     if (!form.email || !form.password || !form.name) return toast.error('Fill required fields')
     if (form.password.length < 6) return toast.error('Password min 6 chars')
+    if (!/^\S+@\S+\.\S+$/.test(form.email)) return toast.error('Invalid email')
+    
+    setCreating(true)
+    // Create a secondary Firebase app to avoid logging out the admin
+    const secondaryApp = initializeApp(firebaseConfig, 'Secondary-' + Date.now())
+    const secondaryAuth = getAuth(secondaryApp)
+    
     try {
-      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password)
+      // Create user in secondary auth (doesn't affect admin session)
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, form.email, form.password)
+      
+      // Save user to Firestore
       await setDoc(doc(db, 'users', cred.user.uid), {
         name: form.name,
         email: form.email,
         mobile: form.mobile || '',
-        role: form.role,
-        status: 'active',  // Admin-created users are active
+        role: form.role,        // 'admin' or 'operator'
+        status: 'active',        // Admin-created users are active immediately
+        createdBy: 'admin',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       })
-      toast.success(`${form.role} created!`)
+      
+      // Cleanup
+      await deleteApp(secondaryApp)
+      
+      toast.success(`${form.role === 'admin' ? 'Admin' : 'Operator'} created successfully!`)
       setModal(false)
       setForm({ name: '', email: '', password: '', mobile: '', role: 'operator' })
       load()
     } catch (err) {
-      let msg = err.message?.replace('Firebase: ', '') || 'Failed'
+      console.error(err)
+      let msg = err.message?.replace('Firebase: ', '') || 'Failed to create user'
       if (err.code === 'auth/email-already-in-use') msg = 'Email already in use'
+      if (err.code === 'auth/invalid-email') msg = 'Invalid email'
+      if (err.code === 'auth/weak-password') msg = 'Password too weak (min 6 chars)'
       toast.error(msg)
+      try { await deleteApp(secondaryApp) } catch {}
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -82,6 +117,7 @@ export default function UsersManage() {
     load()
   }
 
+  // Filter & search
   let filtered = list
   if (filter === 'pending') filtered = filtered.filter(u => u.status === 'pending')
   if (filter === 'active') filtered = filtered.filter(u => u.status === 'active')
@@ -95,17 +131,65 @@ export default function UsersManage() {
   )
 
   const pendingCount = list.filter(u => u.status === 'pending').length
+  const adminCount = list.filter(u => {
+    const r = u.role
+    return r === 'admin' || r === 'super_admin' || r === 'owner'
+  }).length
+  const operatorCount = list.filter(u => {
+    const r = u.role
+    return r === 'operator' || r === 'vle'
+  }).length
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900">User Management</h1>
-          <p className="text-slate-600 text-sm mt-1">Approve pending accounts, manage users</p>
+          <p className="text-slate-600 text-sm mt-1">Create and manage all users</p>
         </div>
         <button onClick={() => setModal(true)} className="btn-primary">
           <Plus size={18} /> Create User
         </button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <UserCog className="text-blue-600" size={16} />
+            </div>
+            <p className="text-xs font-semibold text-slate-500">Total Users</p>
+          </div>
+          <p className="text-2xl font-extrabold text-slate-900">{list.length}</p>
+        </div>
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+              <Shield className="text-purple-600" size={16} />
+            </div>
+            <p className="text-xs font-semibold text-slate-500">Admins</p>
+          </div>
+          <p className="text-2xl font-extrabold text-slate-900">{adminCount}</p>
+        </div>
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+              <UserCog className="text-emerald-600" size={16} />
+            </div>
+            <p className="text-xs font-semibold text-slate-500">Operators</p>
+          </div>
+          <p className="text-2xl font-extrabold text-slate-900">{operatorCount}</p>
+        </div>
+        <div className="card p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+              <Clock className="text-amber-600" size={16} />
+            </div>
+            <p className="text-xs font-semibold text-slate-500">Pending</p>
+          </div>
+          <p className="text-2xl font-extrabold text-slate-900">{pendingCount}</p>
+        </div>
       </div>
 
       {pendingCount > 0 && (
@@ -204,7 +288,7 @@ export default function UsersManage() {
                 )
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-8 text-slate-500">No users found</td></tr>
+                <tr><td colSpan={6} className="text-center py-8 text-slate-500">No users found. Click "Create User" to add.</td></tr>
               )}
             </tbody>
           </table>
@@ -236,9 +320,9 @@ export default function UsersManage() {
                 ['Shop Address', viewUser.shopAddress],
                 ['Role', viewUser.role],
                 ['Status', viewUser.status],
-                ['KYC Done', viewUser.kycDone ? 'Yes' : 'No'],
                 ['Payment', viewUser.paymentAmount ? `₹${viewUser.paymentAmount}` : '-'],
-                ['Payment ID', viewUser.paymentId]
+                ['Payment ID', viewUser.paymentId],
+                ['Created', viewUser.createdAt?.seconds ? new Date(viewUser.createdAt.seconds * 1000).toLocaleString() : '-']
               ].map(([label, val]) => val && (
                 <div key={label}>
                   <p className="text-xs font-bold text-slate-500 uppercase">{label}</p>
@@ -247,41 +331,56 @@ export default function UsersManage() {
               ))}
             </div>
 
-            {viewUser.aadharFrontUrl && (
-              <div className="mb-4">
-                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Aadhaar Front</p>
-                <img src={viewUser.aadharFrontUrl} alt="Aadhaar Front" className="w-full max-w-xs rounded-xl" />
-              </div>
-            )}
-
             <button onClick={() => setViewUser(null)} className="btn-primary w-full">Close</button>
           </div>
         </div>
       )}
 
-      {/* Create Modal */}
+      {/* Create User Modal */}
       {modal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setModal(false)}>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => !creating && setModal(false)}>
           <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Create User</h2>
-              <button onClick={() => setModal(false)} className="p-1 hover:bg-slate-100 rounded"><X size={20} /></button>
+              <h2 className="text-xl font-bold">Create New User</h2>
+              {!creating && <button onClick={() => setModal(false)} className="p-1 hover:bg-slate-100 rounded"><X size={20} /></button>}
             </div>
+            
             <form onSubmit={create} className="space-y-3">
-              <div><label className="label">Full Name *</label><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
-              <div><label className="label">Email *</label><input type="email" className="input" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required /></div>
-              <div><label className="label">Password *</label><input type="password" className="input" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={6} /></div>
-              <div><label className="label">Mobile</label><input className="input" maxLength={10} value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value.replace(/\D/g, '') })} /></div>
               <div>
-                <label className="label">Role</label>
+                <label className="label">Full Name *</label>
+                <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Enter full name" required />
+              </div>
+              <div>
+                <label className="label">Email *</label>
+                <input type="email" className="input" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="user@example.com" required />
+              </div>
+              <div>
+                <label className="label">Password * (min 6 chars)</label>
+                <input type="text" className="input font-mono" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Set password" required minLength={6} />
+                <p className="text-xs text-slate-500 mt-1">Ye password user ko batana hoga login ke liye</p>
+              </div>
+              <div>
+                <label className="label">Mobile</label>
+                <input className="input" maxLength={10} value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value.replace(/\D/g, '') })} placeholder="10-digit mobile" />
+              </div>
+              <div>
+                <label className="label">Role *</label>
                 <select className="input" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
                   <option value="operator">Operator (Limited Access)</option>
                   <option value="admin">Admin (Full Access)</option>
                 </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {form.role === 'admin' 
+                    ? '⚠️ Admin ko poori website ka access milega' 
+                    : 'ℹ️ Operator sirf apni entries manage kar sakta hai'}
+                </p>
               </div>
+              
               <div className="flex gap-3 justify-end pt-2">
-                <button type="button" onClick={() => setModal(false)} className="btn-secondary">Cancel</button>
-                <button type="submit" className="btn-primary">Create</button>
+                <button type="button" onClick={() => setModal(false)} disabled={creating} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={creating} className="btn-primary">
+                  {creating ? 'Creating...' : `Create ${form.role === 'admin' ? 'Admin' : 'Operator'}`}
+                </button>
               </div>
             </form>
           </div>
@@ -292,7 +391,7 @@ export default function UsersManage() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setConfirm(null)}>
           <div className="bg-white rounded-2xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold mb-2">Delete User?</h3>
-            <p className="text-slate-600 text-sm mb-6">This cannot be undone.</p>
+            <p className="text-slate-600 text-sm mb-6">This will remove the user record from Firestore. Auth account will remain in Firebase.</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setConfirm(null)} className="btn-secondary">Cancel</button>
               <button onClick={remove} className="btn-danger">Delete</button>

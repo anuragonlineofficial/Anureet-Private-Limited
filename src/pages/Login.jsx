@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { LogIn, Mail, Lock, Shield, UserCog } from 'lucide-react'
@@ -6,11 +6,24 @@ import toast from 'react-hot-toast'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '../services/firebase'
+import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
   const [form, setForm] = useState({ email: '', password: '', role: 'admin' })
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { user, userData, loading: authLoading } = useAuth()
+
+  // ✅ Auto-redirect if already logged in
+  useEffect(() => {
+    if (authLoading) return
+    if (user && userData) {
+      let role = userData.role
+      if (role === 'super_admin' || role === 'owner') role = 'admin'
+      if (role === 'vle') role = 'operator'
+      navigate(role === 'admin' ? '/admin' : '/operator', { replace: true })
+    }
+  }, [user, userData, authLoading, navigate])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -48,20 +61,35 @@ export default function Login() {
       
       if (!roleMatch) {
         await signOut(auth)
-        return toast.error(`You are not authorized as ${form.role}`)
+        return toast.error(`You are not authorized as ${form.role}. Please select "${role}" tab.`)
       }
       
       toast.success('Login successful!')
-      setTimeout(() => {
-        navigate(role === 'admin' ? '/admin' : '/operator')
-      }, 500)
+      // Auto-redirect will happen via useEffect
       
     } catch (err) {
       console.error(err)
-      toast.error(err.message?.replace('Firebase: ', '') || 'Login failed')
+      let msg = err.message?.replace('Firebase: ', '') || 'Login failed'
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        msg = 'Invalid email or password'
+      }
+      if (err.code === 'auth/user-not-found') msg = 'User not found'
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
+  }
+
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-orange-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+          <p className="text-slate-600 font-semibold">Checking session...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -101,7 +129,7 @@ export default function Login() {
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input type="text" className="input pl-10" value={form.email}
-                  onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Email ya mobile" required />
+                  onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Email or mobile" required />
               </div>
             </div>
             <div>

@@ -8,11 +8,11 @@ import { getVLEUsers } from '../../services/userService'
 import ServicesManage from './ServicesManage'
 import CategoriesManage from './CategoriesManage'
 import EntriesManage from './EntriesManage'
-import VLEManage from './VLEManage'
+import UsersManage from './UsersManage'
 
 function DashboardOverview() {
   const { userData } = useAuth()
-  const [stats, setStats] = useState({ services: 0, vle: 0, entries: 0, pending: 0, approved: 0, rejected: 0 })
+  const [stats, setStats] = useState({ services: 0, users: 0, entries: 0, pending: 0, approved: 0, rejected: 0 })
   const [recent, setRecent] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -21,7 +21,7 @@ function DashboardOverview() {
       .then(([entries, services, users]) => {
         setStats({
           services: services.length,
-          vle: users.filter(u => u.role === 'vle').length,
+          users: users.length,
           entries: entries.length,
           pending: entries.filter(e => e.status === 'pending').length,
           approved: entries.filter(e => e.status === 'approved').length,
@@ -35,7 +35,7 @@ function DashboardOverview() {
 
   const statCards = [
     { label: 'Total Services', value: stats.services, icon: FileText, color: 'from-blue-500 to-blue-700' },
-    { label: 'VLE Users', value: stats.vle, icon: Users, color: 'from-orange-500 to-orange-600' },
+    { label: 'Total Users', value: stats.users, icon: Users, color: 'from-orange-500 to-orange-600' },
     { label: 'Total Entries', value: stats.entries, icon: ClipboardList, color: 'from-indigo-500 to-indigo-700' },
     { label: 'Pending', value: stats.pending, icon: Clock, color: 'from-amber-500 to-amber-600' },
     { label: 'Approved', value: stats.approved, icon: CheckCircle2, color: 'from-emerald-500 to-emerald-700' },
@@ -118,13 +118,12 @@ export default function AdminDashboard() {
     { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
     { to: '/admin/services', label: 'Services', icon: FileText },
     { to: '/admin/categories', label: 'Categories', icon: Tags },
-    { to: '/admin/vle', label: 'VLE Management', icon: Users },
+    { to: '/admin/users', label: 'User Management', icon: Users },
     { to: '/admin/entries', label: 'All Entries', icon: ClipboardList }
   ]
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar */}
       <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-gradient-to-b from-slate-900 to-blue-900 text-white transform transition-transform lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 h-full flex flex-col">
           <div className="flex items-center gap-2 mb-8">
@@ -133,7 +132,7 @@ export default function AdminDashboard() {
             </div>
             <div>
               <p className="font-extrabold text-sm">ANUREET</p>
-              <p className="text-[10px] text-slate-300 tracking-wider">SUPER ADMIN</p>
+              <p className="text-[10px] text-slate-300 tracking-wider">ADMIN PANEL</p>
             </div>
           </div>
 
@@ -160,12 +159,10 @@ export default function AdminDashboard() {
         </div>
       </aside>
 
-      {/* Mobile overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Main Content */}
       <main className="flex-1 min-w-0">
         <header className="lg:hidden bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-20">
           <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-slate-100">
@@ -182,7 +179,7 @@ export default function AdminDashboard() {
             <Route index element={<DashboardOverview />} />
             <Route path="services" element={<ServicesManage />} />
             <Route path="categories" element={<CategoriesManage />} />
-            <Route path="vle" element={<VLEManage />} />
+            <Route path="users" element={<UsersManage />} />
             <Route path="entries" element={<EntriesManage />} />
           </Routes>
         </div>
