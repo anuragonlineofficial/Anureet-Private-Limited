@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+} from "firebase/firestore";
 import { Cashfree } from "cashfree-pg";
+
+export const runtime = "nodejs";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,44 +24,57 @@ const db = getFirestore(app);
 
 export async function POST(req: Request) {
   try {
-    const { serviceId, userId, formData } = await req.json();
+    const body = await req.json();
+    const { serviceId, userId, formData } = body;
 
     if (!serviceId || !userId) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
     }
 
-    // Fetch TRUSTED price from Firestore
     const serviceSnap = await getDoc(doc(db, "services", serviceId));
     if (!serviceSnap.exists()) {
-      return NextResponse.json({ error: "Service not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Service not found" },
+        { status: 404 }
+      );
     }
     const service = serviceSnap.data();
     if (!service.active) {
-      return NextResponse.json({ error: "Service not available" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Service not available" },
+        { status: 400 }
+      );
     }
 
     const trustedAmount = Number(service.price);
     if (!trustedAmount || trustedAmount <= 0) {
-      return NextResponse.json({ error: "Invalid service price" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid service price" },
+        { status: 400 }
+      );
     }
 
-    const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const orderId = `ORD_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 9)}`;
 
-    // Save payment record (payment pending)
     await setDoc(doc(db, "payments", orderId), {
       orderId,
       vleId: userId,
       serviceId,
       serviceName: service.name,
-      formData,
+      formData: formData || {},
       amount: trustedAmount,
       paymentStatus: "PENDING",
       applicationStatus: "PAYMENT_PENDING",
       createdAt: new Date().toISOString(),
     });
 
-    Cashfree.XClientId = process.env.CASHFREE_APP_ID!;
-    Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY!;
+    Cashfree.XClientId = process.env.CASHFREE_APP_ID as string;
+    Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY as string;
     Cashfree.XEnvironment =
       process.env.CASHFREE_ENV === "production"
         ? Cashfree.Environment.PRODUCTION
@@ -75,7 +95,13 @@ export async function POST(req: Request) {
       paymentSessionId: response.data.payment_session_id,
     });
   } catch (error: any) {
-    console.error("Create order error:", error?.response?.data || error.message);
-    return NextResponse.json({ error: "Order creation failed" }, { status: 500 });
+    console.error(
+      "Create order error:",
+      error?.response?.data || error?.message || error
+    );
+    return NextResponse.json(
+      { error: "Order creation failed" },
+      { status: 500 }
+    );
   }
 }
